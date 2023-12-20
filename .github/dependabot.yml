@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Maintain Go Dependencies
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+  # Maintain GitHub Actions Dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+
