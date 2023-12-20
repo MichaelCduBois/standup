@@ -165,8 +165,10 @@ func main() {
 		case item.yesterday:
 			yesterdayItems = append(yesterdayItems, item)
 			break
+		case !item.blocker && !item.yesterday:
+			items = append(items, item)
+			break
 		}
-		items = append(items, item)
 	}
 	err = rows.Err()
 	checkErr(err)
@@ -175,14 +177,18 @@ func main() {
 		for _, blocker := range blockerItems {
 			fmt.Printf("- %v\n", blocker.item)
 		}
-		fmt.Println()
+		if len(yesterdayItems) > 0 || len(items) > 0 {
+			fmt.Println()
+		}
 	}
 	if len(yesterdayItems) > 0 {
 		fmt.Println("##### Yesterday #####")
 		for _, yesterday := range yesterdayItems {
 			fmt.Printf("- %v\n", yesterday.item)
 		}
-		fmt.Println()
+		if len(items) > 0 {
+			fmt.Println()
+		}
 	}
 	if len(items) > 0 {
 		fmt.Println("##### Today #####")
