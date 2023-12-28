@@ -18,135 +18,126 @@ type StandupItem struct {
 }
 
 func main() {
-	// Check or Create .standup Directory
-	homeDir, err := os.UserHomeDir()
-	checkErr(err)
-	standupDir := homeDir + "/.standup"
-	err = os.Mkdir(standupDir, 0700)
-	if err != nil && !os.IsExist(err) {
-		log.Fatal(err)
-	}
-
+	// Setup Database
+	db := setupDatabase("data")
 	// Setup Flags
-	add := flag.Bool("add", false, "Add item to standup notes")
-	age := flag.Bool("age", false, "Age standup items creating new day")
-	del := flag.Bool("delete", false, "Delete item from standup notes")
-	list := flag.Bool("list", false, "List all standup items")
-	reset := flag.Bool("reset", false, "Delete all standup items")
-
-	// Initialize Add Options
-	blocker := flag.Bool("blocker", false, "Mark item as Blocker")
-	yesterday := flag.Bool("yesterday", false, "Add item to Standup Notes for previous day")
-	// Parse Flags
-	flag.Parse()
-
-	item := flag.Arg(0)
-
-	// Create Database Connection
-	db, err := sql.Open("sqlite3", standupDir+"/data.db")
-	checkErr(err)
-	defer db.Close()
-
-	sqlQuery := `
-    CREATE TABLE IF NOT EXISTS notes (
-      id        INTEGER PRIMARY KEY,
-      blocker   BOOLEAN,
-      item      STRING  NOT NULL,
-      yesterday BOOLEAN
-    )
-  `
-	_, err = db.Exec(sqlQuery)
-	checkErr(err)
+	add, age, del, list, reset, blocker, yesterday := setupFlags()
+	// Get Stanup Items
+	items := flag.Args()
 
 	switch {
 	case *add:
-		standupItem := StandupItem{}
-		if *blocker {
-			standupItem.blocker = true
+		for _, item := range items {
+			addItem(db, item, blocker, yesterday)
 		}
-		if *yesterday {
-			standupItem.yesterday = true
-		}
-		standupItem.item = item
-
-		sqlQuery = `
-      INSERT INTO notes (
-        id,
-        blocker,
-        item,
-        yesterday
-      ) VALUES (
-        ?,
-        ?,
-        ?,
-        ?
-      )
-    `
-		sqlStmt, _ := db.Prepare(sqlQuery)
-		sqlStmt.Exec(
-			nil,
-			standupItem.blocker,
-			standupItem.item,
-			standupItem.yesterday,
-		)
-		defer sqlStmt.Close()
 		return
 
 	case *del:
-		sqlQuery = "DELETE FROM notes WHERE id=?"
-		sqlStmt, err := db.Prepare(sqlQuery)
-		checkErr(err)
-		defer sqlStmt.Close()
-		_, err = sqlStmt.Exec(item)
-		checkErr(err)
+		for _, item := range items {
+			executeQuery(db, "DELETE FROM notes WHERE id=?", item)
+		}
 		return
 
 	case *age:
-		sqlQuery = "DELETE FROM notes WHERE yesterday=1"
-		sqlStmt, err := db.Prepare(sqlQuery)
-		checkErr(err)
-		defer sqlStmt.Close()
-		_, err = sqlStmt.Exec()
-		checkErr(err)
-		sqlQuery = "UPDATE notes SET yesterday=1"
-		sqlStmt, err = db.Prepare(sqlQuery)
-		checkErr(err)
-		defer sqlStmt.Close()
-		_, err = sqlStmt.Exec()
-		checkErr(err)
+		executeQuery(db, "DELETE FROM notes WHERE yesterday=1", "")
+		executeQuery(db, "UPDATE notes SET yesterday=1", "")
 		return
 
 	case *list:
-		rows, err := db.Query("SELECT id, item FROM notes")
-		defer rows.Close()
-		err = rows.Err()
-		checkErr(err)
-		items := make([]StandupItem, 0)
-		for rows.Next() {
-			item := StandupItem{}
-			err = rows.Scan(&item.id, &item.item)
-			checkErr(err)
-			items = append(items, item)
-		}
-		err = rows.Err()
-		checkErr(err)
-		if len(items) > 0 {
-			fmt.Println("# -- Standup Item")
-			fmt.Println("=================")
-			for _, item := range items {
-				fmt.Printf("%v -- %v\n", item.id, item.item)
-			}
-		} else {
-			fmt.Println("No Standup Items. Please use the '-add' flag.")
-		}
+		listItem(db)
 		return
 
 	case *reset:
-		db.Exec("DELETE FROM notes")
+		executeQuery(db, "DELETE FROM notes", "")
 		return
 	}
 
 	// Generate Standup Notes
+	outputStandup(db)
+	db.Close()
+}
+
+func addItem(db *sql.DB, item string, blocker *bool, yesterday *bool) {
+	standupItem := StandupItem{}
+	if *blocker {
+		standupItem.blocker = true
+	}
+	if *yesterday {
+		standupItem.yesterday = true
+	}
+	standupItem.item = item
+
+	sqlQuery := `
+     INSERT INTO notes (
+       id,
+       blocker,
+       item,
+       yesterday
+     ) VALUES (
+       ?,
+       ?,
+       ?,
+       ?
+     )
+   `
+	sqlStmt, err := db.Prepare(sqlQuery)
+	checkErr(err)
+	sqlStmt.Exec(
+		nil,
+		standupItem.blocker,
+		standupItem.item,
+		standupItem.yesterday,
+	)
+	defer sqlStmt.Close()
+}
+
+func checkErr(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func executeQuery(db *sql.DB, sqlQuery string, item string) *sql.Stmt {
+	sqlStmt, err := db.Prepare(sqlQuery)
+	checkErr(err)
+	defer sqlStmt.Close()
+	if item != "" {
+		_, err = sqlStmt.Exec(item)
+		checkErr(err)
+	} else {
+		_, err = sqlStmt.Exec()
+		checkErr(err)
+	}
+
+	return sqlStmt
+}
+
+func listItem(db *sql.DB) {
+	rows, err := db.Query("SELECT id, item FROM notes")
+	defer rows.Close()
+	err = rows.Err()
+	checkErr(err)
+	items := make([]StandupItem, 0)
+	for rows.Next() {
+		item := StandupItem{}
+		err = rows.Scan(&item.id, &item.item)
+		checkErr(err)
+		items = append(items, item)
+	}
+	err = rows.Err()
+	checkErr(err)
+	if len(items) > 0 {
+		fmt.Println("# -- Standup Item")
+		fmt.Println("=================")
+		for _, item := range items {
+			fmt.Printf("%v -- %v\n", item.id, item.item)
+		}
+	} else {
+		fmt.Println("No Standup Items. Please use the '-add' flag.")
+	}
+}
+
+func outputStandup(db *sql.DB) {
 	rows, err := db.Query("SELECT * FROM notes")
 	defer rows.Close()
 	err = rows.Err()
@@ -198,8 +189,46 @@ func main() {
 	}
 }
 
-func checkErr(err error) {
-	if err != nil {
+func setupFlags() (*bool, *bool, *bool, *bool, *bool, *bool, *bool) {
+	// Setup Flags
+	add := flag.Bool("add", false, "Add item to standup notes")
+	age := flag.Bool("age", false, "Age standup items creating new day")
+	del := flag.Bool("delete", false, "Delete item from standup notes")
+	list := flag.Bool("list", false, "List all standup items")
+	reset := flag.Bool("reset", false, "Delete all standup items")
+	// Initialize Add Options
+	blocker := flag.Bool("blocker", false, "Mark item as Blocker")
+	yesterday := flag.Bool("yesterday", false, "Add item to Standup Notes for previous day")
+	// Parse Flags
+	flag.Parse()
+	// Return options
+	return add, age, del, list, reset, blocker, yesterday
+}
+
+func setupDatabase(dbName string) *sql.DB {
+	// Check or Create .standup Directory
+	homeDir, err := os.UserHomeDir()
+	checkErr(err)
+	standupDir := homeDir + "/.standup"
+	err = os.Mkdir(standupDir, 0700)
+	if err != nil && !os.IsExist(err) {
 		log.Fatal(err)
 	}
+
+	// Create Database Connection
+	db, err := sql.Open("sqlite3", standupDir+"/"+dbName+".db")
+	checkErr(err)
+	//defer db.Close()
+
+	sqlQuery := `
+    CREATE TABLE IF NOT EXISTS notes (
+      id        INTEGER PRIMARY KEY,
+      blocker   BOOLEAN,
+      item      STRING  NOT NULL,
+      yesterday BOOLEAN
+    )
+  `
+	_, err = db.Exec(sqlQuery)
+	checkErr(err)
+	return db
 }
