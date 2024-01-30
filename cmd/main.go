@@ -29,16 +29,12 @@ func main() {
 	case *add:
 		for _, item := range items {
 			addItem(db, item, blocker, yesterday)
-			outputStandup(db)
 		}
-		return
 
 	case *del:
 		for _, item := range items {
 			executeQuery(db, "DELETE FROM notes WHERE id=?", item)
-			outputStandup(db)
 		}
-		return
 
 	case *age:
 		executeQuery(db, "DELETE FROM notes WHERE yesterday=1", "")
